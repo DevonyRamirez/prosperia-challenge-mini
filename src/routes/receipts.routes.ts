@@ -1,8 +1,9 @@
 import express, { Request, Response } from 'express';
-import multer from 'multer';
+// @ts-ignore
+import multer, { FileFilterCallback } from 'multer';
 import fs from 'fs/promises';
 import path from 'path';
-import { v4 as uuidv4 } from 'crypto';
+import { randomUUID as uuidv4 } from 'crypto';
 import { logger } from '../config/logger.js';
 import { config } from '../config/env.js';
 import { getOcrProvider } from '../services/ocr.service.js';
@@ -16,7 +17,7 @@ const router = express.Router();
 const upload = multer({
   dest: config.uploadDir,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
-  fileFilter: (_req, file, cb) => {
+  fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     const allowed = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
@@ -45,16 +46,39 @@ router.post('/api/receipts', upload.single('file'), async (req: Request, res: Re
       throw new AppError(400, 'No file uploaded');
     }
 
-    // TODO: Implement the receipt upload logic
-    // Steps:
-    // 1. Generate a unique ID for the receipt
-    // 2. Get OCR provider
-    // 3. Extract text from the uploaded file
-    // 4. Parse the text to extract receipt data
-    // 5. Store in the receipts map
-    // 6. Return the result
+    const file = req.file;
+    const id = uuidv4();
+    const uploadedAt = new Date().toISOString();
 
-    res.status(501).json({ error: 'TODO: Implement receipt upload endpoint' });
+    try {
+
+      // 1. Get OCR provider and extract text
+      const ocr = getOcrProvider('tesseract');
+      const rawText = await ocr.extractText(file.path);
+
+      // 2. Parse the extracted text
+      const parser = new ReceiptParser();
+      const parsedData = parser.parse(rawText);
+
+      // 3. Construct result
+      const result: ReceiptResult = {
+        id,
+        filename: file.originalname,
+        uploadedAt,
+        data: parsedData,
+      };
+
+      // 4. Store result
+      receipts.set(id, result);
+
+      // 5. Return result
+      res.json(result);
+    } finally {
+      // Cleanup: remove uploaded file
+      await fs.unlink(file.path).catch((err) => {
+        logger.error(`[Receipt] Failed to delete temp file ${file.path}: ${err}`);
+      });
+    }
   } catch (error) {
     logger.error(`[Receipt] Error uploading receipt: ${error}`);
     const appError = error instanceof AppError ? error : new AppError(500, 'Failed to process receipt');
