@@ -289,6 +289,114 @@ export class ReceiptParser {
       }
     }
 
+    // --- Post-Procesamiento / Cálculos ---
+    // ESTRATEGIA: Priorizar cálculos sobre valores extraídos para el monto del impuesto
+    // 1. Extraer: Subtotal, % Impuesto, Total (más confiables)
+    // 2. Calcular: Monto Impuesto = Subtotal × (% Impuesto / 100)
+    // 3. Validar: Subtotal + Monto Impuesto ≈ Total
+    // 4. Ajustar si es necesario
+
+    logger.info('[Parser] Iniciando cálculos de post-procesamiento...');
+    logger.info(`  Inicial - Subtotal: ${data.subtotalAmount}, % Impuesto: ${data.taxPercentage}, Impuesto: ${data.taxAmount}, Total: ${data.amount}`);
+
+    // Paso 1: Manejar casos de impuesto cero
+    if (data.amount && !data.taxAmount && !data.taxPercentage) {
+      const zeroTaxMatch = rawText.match(/(?:itbms|tax|impuesto)[^0-9]*0+\.0+/i);
+      if (zeroTaxMatch) {
+        data.taxAmount = 0;
+        data.taxPercentage = 0;
+        data.subtotalAmount = data.amount;
+        logger.info('[Parser] Factura con impuesto cero detectada');
+      }
+    }
+
+    // Paso 2: Calcular Subtotal si falta
+    if (!data.subtotalAmount && data.amount !== undefined && data.taxAmount !== undefined) {
+      data.subtotalAmount = parseFloat((data.amount - data.taxAmount).toFixed(2));
+      logger.info(`[Parser] Subtotal calculado: ${data.subtotalAmount}`);
+    }
+
+    // Paso 2.5: Calcular Subtotal desde Total y % Impuesto (Crítico cuando falta el subtotal)
+    if (!data.subtotalAmount && data.amount && data.taxPercentage) {
+      // Total = Subtotal * (1 + tasa)  =>  Subtotal = Total / (1 + tasa)
+      const subtotal = data.amount / (1 + data.taxPercentage / 100);
+      data.subtotalAmount = parseFloat(subtotal.toFixed(2));
+
+      // También derivar el monto del impuesto si falta
+      if (data.taxAmount === undefined) {
+        data.taxAmount = parseFloat((data.amount - data.subtotalAmount).toFixed(2));
+      }
+      logger.info(`[Parser] Subtotal calculado desde Total + % Impuesto: ${data.subtotalAmount}`);
+    }
+
+    // Paso 3: PRIORIDAD - Calcular Impuesto desde Subtotal × % Impuesto (más confiable)
+    if (data.subtotalAmount && data.taxPercentage !== undefined) {
+      const calculatedTax = parseFloat((data.subtotalAmount * (data.taxPercentage / 100)).toFixed(2));
+
+      if (data.taxAmount !== undefined) {
+        const diff = Math.abs(calculatedTax - data.taxAmount);
+        if (diff > 0.05) {
+          logger.info(`[Parser] ¡Discrepancia en impuesto! Extraído: ${data.taxAmount}, Calculado: ${calculatedTax}. Usando calculado.`);
+          data.taxAmount = calculatedTax;
+        }
+      } else {
+        data.taxAmount = calculatedTax;
+        logger.info(`[Parser] Impuesto calculado: ${data.taxAmount}`);
+      }
+    }
+
+    // Paso 4: Calcular Impuesto desde Total - Subtotal si aún falta
+    if (data.taxAmount === undefined && data.amount && data.subtotalAmount) {
+      data.taxAmount = parseFloat((data.amount - data.subtotalAmount).toFixed(2));
+      logger.info(`[Parser] Impuesto calculado desde Total - Subtotal: ${data.taxAmount}`);
+    }
+
+    // Paso 5: Calcular % Impuesto si falta
+    if (!data.taxPercentage && data.taxAmount !== undefined && data.subtotalAmount && data.subtotalAmount > 0) {
+      data.taxPercentage = parseFloat(((data.taxAmount / data.subtotalAmount) * 100).toFixed(2));
+      logger.info(`[Parser] % Impuesto calculado: ${data.taxPercentage}%`);
+    }
+
+    // Paso 6: Calcular Total si falta
+    if (!data.amount && data.subtotalAmount && data.taxAmount !== undefined) {
+      data.amount = parseFloat((data.subtotalAmount + data.taxAmount).toFixed(2));
+      logger.info(`[Parser] Total calculado: ${data.amount}`);
+    }
+
+    // Paso 7: Validar Subtotal + Impuesto ≈ Total
+    if (data.subtotalAmount && data.taxAmount !== undefined && data.amount) {
+      const calculatedTotal = parseFloat((data.subtotalAmount + data.taxAmount).toFixed(2));
+      const diff = Math.abs(calculatedTotal - data.amount);
+
+      if (diff > 0.10) {
+        logger.warn(`[Parser] ADVERTENCIA: ¡Discrepancia en Total! ${data.subtotalAmount} + ${data.taxAmount} = ${calculatedTotal}, pero Total = ${data.amount}`);
+        data.taxAmount = parseFloat((data.amount - data.subtotalAmount).toFixed(2));
+        if (data.subtotalAmount > 0) {
+          data.taxPercentage = parseFloat(((data.taxAmount / data.subtotalAmount) * 100).toFixed(2));
+        }
+        logger.info(`[Parser] Impuesto ajustado: ${data.taxAmount} (${data.taxPercentage}%)`);
+      } else {
+        logger.info(`[Parser] Validación exitosa: ${data.subtotalAmount} + ${data.taxAmount} ≈ ${data.amount}`);
+      }
+    }
+
+    // Paso 8: Fallback
+    if (!data.subtotalAmount && data.amount !== undefined) {
+      // Intento final: Si hay múltiples montos detectados, el segundo más grande podría ser el subtotal
+      if (sortedAmounts.length > 1 && sortedAmounts[1] < data.amount && sortedAmounts[1] > 0) {
+        data.subtotalAmount = sortedAmounts[1];
+        logger.info(`[Parser] Fallback Heurístico: Usando el segundo monto más grande como Subtotal: ${data.subtotalAmount}`);
+
+        // Recalcular impuesto basado en este nuevo subtotal
+        if (!data.taxAmount) {
+          data.taxAmount = parseFloat((data.amount - data.subtotalAmount).toFixed(2));
+        }
+      } else {
+        data.subtotalAmount = data.amount;
+        logger.info(`[Parser] Fallback: Subtotal = Total`);
+      }
+    }
+
     logger.info('[Parser] Extracción completada:');
     logger.info(`  - Vendedor: ${data.vendorName || 'N/A'}`);
     logger.info(`  - Factura: ${data.invoiceNumber || 'N/A'}`);
