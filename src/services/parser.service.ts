@@ -3,65 +3,299 @@ import { logger } from '../config/logger.js';
 
 export class ReceiptParser {
   /**
-   * Parse raw OCR text to extract receipt information
+   * Analiza el texto OCR sin procesar para extraer información del recibo
    */
   parse(rawText: string): ReceiptData {
-    logger.info('[Parser] Parsing receipt data...');
+    logger.info('[Parser] Analizando datos del recibo...');
+    logger.info(`[Parser] Longitud del texto sin procesar: ${rawText.length} caracteres`);
 
     const data: ReceiptData = {
       rawText,
     };
 
-    // Helper to parse currency strings (e.g., "$1,234.56" -> 1234.56)
-    const parseCurrency = (str: string): number => {
-      return parseFloat(str.replace(/[$,]/g, ''));
+    // Normalizar texto para reducir errores OCR y facilitar búsquedas
+    const normalize = (txt: string) => {
+      return txt
+        .replace(/\r/g, '\n')
+        // reemplazos comunes de OCR
+        .replace(/\bO(?=\d)/g, '0')
+        .replace(/\bI(?=\d)/g, '1')
+        .replace(/\bS(?=\d)/g, '5')
+        .replace(/[\u00A0\t]+/g, ' ')
+        .replace(/\u2013|\u2014/g, '-')
+        .replace(/\s+\n/g, '\n')
+        .replace(/\n{2,}/g, '\n')
+        .trim();
     };
 
-    // 1. Extract Total Amount
-    // Matches: "Total: $123.45", "TOTAL 123.45", etc.
-    const totalMatch = rawText.match(/total.*?\$?([\d,]+\.?\d*)/i);
-    if (totalMatch && totalMatch[1]) {
-      data.amount = parseCurrency(totalMatch[1]);
+    const text = normalize(rawText);
+
+    // Función auxiliar para analizar cadenas de moneda (ej., "$1,234.56" -> 1234.56)
+    const parseCurrency = (str: string): number => {
+      if (!str) return NaN;
+      // Trim and normalize spaces
+      let s = String(str).trim();
+
+      // Remove currency symbols and surrounding text
+      s = s.replace(/[^0-9,\.\-]/g, '');
+
+      // Determine decimal separator: if both . and , present, assume . is thousand and , decimal when pattern fits
+      const hasDot = s.indexOf('.') !== -1;
+      const hasComma = s.indexOf(',') !== -1;
+
+      if (hasDot && hasComma) {
+        // e.g., 1.234,56 -> replace dots, comma -> dot
+        if (/\d+\.\d{3},\d{2}$/.test(s) || /\d{1,3}(?:\.\d{3})+,\d{2}$/.test(s)) {
+          s = s.replace(/\./g, '').replace(/,/g, '.');
+        } else {
+          s = s.replace(/,/g, '');
+        }
+      } else if (hasComma && !hasDot) {
+        // Could be 1234,56 -> comma as decimal
+        if (/\d+,\d{1,2}$/.test(s)) {
+          s = s.replace(/,/g, '.');
+        } else {
+          s = s.replace(/,/g, '');
+        }
+      } else {
+        // only dots or only digits
+        s = s.replace(/,/g, '');
+      }
+
+      const v = parseFloat(s);
+      return isNaN(v) ? NaN : v;
+    };
+
+    // --- Heurística: Encontrar todos los posibles montos monetarios ---
+    const moneyPattern = /(?:\$|USD|EUR|€|GBP|£)?\s*([0-9]{1,3}(?:[.,\s][0-9]{3})*(?:[.,][0-9]{1,2})?)/gi;
+    const moneyMatches: number[] = [];
+    let match;
+    while ((match = moneyPattern.exec(rawText)) !== null) {
+      if (match[1]) {
+        const val = parseFloat(match[1].replace(/,/g, ''));
+        if (!isNaN(val)) {
+          moneyMatches.push(val);
+        }
+      }
     }
 
-    // 2. Extract Subtotal
-    const subtotalMatch = rawText.match(/subtotal.*?\$?([\d,]+\.?\d*)/i);
-    if (subtotalMatch && subtotalMatch[1]) {
-      data.subtotalAmount = parseCurrency(subtotalMatch[1]);
+    const sortedAmounts = moneyMatches.sort((a, b) => b - a);
+    const maxAmount = sortedAmounts.length > 0 ? sortedAmounts[0] : undefined;
+
+    // --- Estrategia: Dividir el texto en secciones para evitar confusión con líneas de artículos ---
+    // Buscar la sección "Desglose" o "Valor Total" que contiene los totales reales
+    const desgloseMatch = text.match(/(desglose\s+itbms|valor\s+total|totals?|amounts?\s+breakdown)([\s\S]*)/i);
+    const totalsSection = desgloseMatch ? desgloseMatch[2] : text;
+
+    // También intentar encontrar una sección explicita de totales (ES/EN)
+    const totalsSectionMatch = text.match(/(valor\s+total|total\s+pagado|desglose|totals?|amount\s+paid)([\s\S]*?)(?:forma\s+de\s+pago|payment\s+method|p[aá]gina|page|$)/i);
+    const extractionText = totalsSectionMatch ? totalsSectionMatch[2] : totalsSection;
+
+    // 1. Extraer Subtotal - Buscar en la sección de totales
+    const subtotalPatterns = [
+      /monto\s+gravado\s+(?:itbms|tbws)[^\d]*([\d,\.]+)?/i,
+      /monto\s*base[^\d]*([\d,\.]+)?/i,
+      /sub[\s-]?total[:\s]*\$?\s*([\d,\.]+)?/i,
+      /subtotal[:\s]*\$?\s*([\d,\.]+)?/i,
+      /importe\s*base[:\s]*\$?\s*([\d,\.]+)?/i,
+      /base\s*imponible[:\s]*\$?\s*([\d,\.]+)?/i,
+      /amount\s*before\s*tax[:\s]*\$?\s*([\d,\.]+)?/i,
+      /amount\s*net[:\s]*\$?\s*([\d,\.]+)?/i
+    ];
+
+    for (const pattern of subtotalPatterns) {
+      const subtotalMatch = extractionText.match(pattern);
+      if (subtotalMatch && subtotalMatch[1]) {
+        const value = parseFloat(subtotalMatch[1].replace(/,/g, ''));
+        if (value > 0) {
+          data.subtotalAmount = value;
+          break;
+        }
+      }
     }
 
-    // 3. Extract Tax
-    // Matches "Tax", "Impuesto", "IVA"
-    const taxMatch = rawText.match(/(?:tax|impuesto|iva).*?\$?([\d,]+\.?\d*)/i);
-    if (taxMatch && taxMatch[1]) {
-      data.taxAmount = parseCurrency(taxMatch[1]);
+    // 2. Extraer Porcentaje de Impuesto - Buscar % en la sección de totales
+    const taxPercentPatterns = [
+      /(\d{1,2}(?:\.\d+)?)\s*%\s*(?:tax|impuesto|iva|itbms|vat|gst)?/i,
+      /(?:tax|impuesto|iva|itbms|vat|gst)[:\s]*(\d{1,2}(?:\.\d+)?)\s*%/i,
+      /rate[:\s]*(\d{1,2}(?:\.\d+)?)\s*%/i,
+      /(\d{1,2}(?:\.\d+)?)\s*%/i
+    ];
+
+    for (const pattern of taxPercentPatterns) {
+      const taxPercentMatch = extractionText.match(pattern);
+      if (taxPercentMatch) {
+        // Obtener el valor del porcentaje (puede estar en diferentes grupos de captura)
+        const percentValue = taxPercentMatch[2] || taxPercentMatch[1];
+        if (percentValue) {
+          const percent = parseFloat(percentValue);
+          // Validar que sea un porcentaje de impuesto razonable (0-25 para la mayoría de los países)
+          if (percent >= 0 && percent <= 25) {
+            data.taxPercentage = percent;
+            break;
+          }
+        }
+      }
     }
 
-    // 4. Extract Invoice Number
-    // Matches "Invoice #123", "Factura A-123", "Ticket #123"
-    const invoiceMatch = rawText.match(/(?:invoice|factura|ticket|recibo)\s*#?\s*([a-zA-Z0-9-]+)/i);
-    if (invoiceMatch && invoiceMatch[1]) {
-      data.invoiceNumber = invoiceMatch[1];
+    // 3. Extraer Monto de Impuesto - Buscar SOLAMENTE en la sección de totales
+    const taxAmountPatterns = [
+      /([\\d,]+\\.\\d{2})\\s+total\\s+([\\d,]+\\.?\\d*)/i,
+
+      /([\d,]+\.?\d*)\s*\|\s*(\d+)\s*\|\s*([\d,]+\.?\d*)/,
+
+      /total\s+impuesto[^\d]*([\d,]+\.?\d*)/i,
+      /toul\s+impusstel[^\d]*([\d,]+\.?\d*)/i,  
+      /total\s+tax[^\d]*([\d,]+\.?\d*)/i,
+
+      /(?:itbms|impuesto|iva|vat|sales\s+tax|gst)(?!.*unitario)[^\d]*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?)(?:\s|$)/i,
+      /tax[:\s]*([\d,\.]+)\s*(?:amount)?/i
+    ];
+
+    for (const pattern of taxAmountPatterns) {
+      const taxMatch = extractionText.match(pattern);
+      if (taxMatch) {
+        let taxValue = null;
+
+        if (taxMatch[3]) {
+          taxValue = parseFloat(taxMatch[3].replace(/,/g, ''));
+        } else if (taxMatch[2] && taxMatch[1]) {
+          const val1 = parseFloat(taxMatch[1].replace(/,/g, ''));
+          const val2 = parseFloat(taxMatch[2].replace(/,/g, ''));
+          taxValue = val1 < val2 ? val1 : null; // Tomar el valor más pequeño como impuesto
+        } else if (taxMatch[1]) {
+          taxValue = parseFloat(taxMatch[1].replace(/,/g, ''));
+        }
+
+        if (taxValue !== null && taxValue >= 0) {
+          if (!data.amount || taxValue < data.amount) {
+            if (!data.subtotalAmount || taxValue < data.subtotalAmount) {
+              data.taxAmount = taxValue;
+              break;
+            }
+          }
+        }
+      }
     }
 
-    // 5. Extract Date
-    // Matches DD/MM/YYYY or MM/DD/YYYY or similar formats
-    const dateMatch = rawText.match(/(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/);
-    if (dateMatch && dateMatch[1]) {
-      data.date = dateMatch[1];
+    // 4. Extraer Monto Total
+    const totalPatterns = [
+      /total\s+pagado[:\s]*\$?\s*([\d,\.]+)/i,
+      /valor\s+total[:\s]*\$?\s*([\d,\.]+)/i,
+      /total(?:\s+a\s+pagar)?[:\s]*\$?\s*([\d,\.]+)/i,
+      /total\s+general[:\s]*\$?\s*([\d,\.]+)/i,
+      /importe\s+total[:\s]*\$?\s*([\d,\.]+)/i,
+      /gran\s+total[:\s]*\$?\s*([\d,\.]+)/i,
+      /amount\s+paid[:\s]*\$?\s*([\d,\.]+)/i,
+      /total[:\s]*\$?\s*([\d,\.]+)/i
+    ];
+
+    for (const pattern of totalPatterns) {
+      const totalMatch = rawText.match(pattern);
+      if (totalMatch && totalMatch[1]) {
+        const parsed = parseCurrency(totalMatch[1]);
+        if (!isNaN(parsed)) {
+          data.amount = parsed;
+          break;
+        }
+      }
     }
 
-    // 6. Vendor Name Heuristic
-    // Assume the first non-empty line is the vendor name
-    const lines = rawText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    if (lines.length > 0) {
-      data.vendorName = lines[0];
+    // Fallback: Usar el monto más grande si no se encuentra el total
+    if (!data.amount && maxAmount) {
+      data.amount = maxAmount;
     }
 
-    // 7. Calculate Tax Percentage if possible
-    if (data.taxAmount && data.subtotalAmount) {
-      data.taxPercentage = parseFloat(((data.taxAmount / data.subtotalAmount) * 100).toFixed(2));
+    // Limpiar Total: A veces el OCR agrega decimales extraños (ej. 199.656 -> 199.66)
+    if (data.amount) {
+      data.amount = parseFloat(data.amount.toFixed(2));
     }
+
+    // 5. Extraer Fecha
+    const labeledDatePattern = /(?:fecha|date|fecha\s+de)[^\dA-Za-z]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/i;
+    const labeledDateMatch = text.match(labeledDatePattern);
+
+    if (labeledDateMatch && labeledDateMatch[1]) {
+      data.date = labeledDateMatch[1];
+    } else {
+      const monthNames = '(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)';
+      const datePattern = new RegExp('(\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{2,4})|(?:(?:' + monthNames + ')\\s+\\d{1,2},?\\s+\\d{4})','i');
+      const dateMatch = text.match(datePattern);
+      if (dateMatch) {
+        data.date = dateMatch[0];
+      }
+    }
+
+    // 6. Extraer Nombre del Vendedor - Múltiples estrategias
+    const vendorPatterns = [
+      /(?:emisor|raz[oó]n\s+social|rnc|nit)[:\s]*([^\n]+)/i,
+      /(?:vendor|vendedor|supplier|supplier\s+name|nombre)[:\s]*([^\n]+)/i,
+      /(?:empresa|company|business)[:\s]*([^\n]+)/i,
+      /(?:nombre\s+comercial|trade\s+name)[:\s]*([^\n]+)/i
+    ];
+
+    for (const pattern of vendorPatterns) {
+      const vendorMatch = rawText.match(pattern);
+      if (vendorMatch && vendorMatch[1]) {
+        data.vendorName = vendorMatch[1].trim();
+        break;
+      }
+    }
+
+    // Fallback: Primera línea no vacía que no sea un encabezado
+    if (!data.vendorName) {
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      const skipPatterns = [
+        /factura/i, /invoice/i, /receipt/i, /comprobante/i,
+        /fecha/i, /date/i, /folio/i, /pag[ia]na/i, /http/i,
+        /^\d+$/, /^[A-Z]$/, /ticket/i
+      ];
+
+      for (const line of lines) {
+        if (line.length < 3 || skipPatterns.some(p => p.test(line))) {
+          continue;
+        }
+        // Prefer lines with letters and at least two words (company names)
+        if (/\d/.test(line) && /[A-Za-z]/.test(line) && line.length < 6) continue;
+        data.vendorName = line;
+        break;
+      }
+    }
+
+    // 7. Extraer Número de Factura - Patrones completos
+    const invoicePatterns = [
+      /n[uú]mero[:\s]*([0-9A-Z-]{3,})/i,
+      /invoice\s*(?:no\.?|n[uú]m\.?|#)?[:\s]*([0-9A-Z-]{3,})/i,
+      /inv\.?\s*#[:\s]*([0-9A-Z-]{3,})/i,
+      /receipt\s*#[:\s]*([0-9A-Z-]{3,})/i,
+      /order\s*#[:\s]*([0-9A-Z-]{3,})/i,
+      /folio[:\s#]*([0-9A-Z-]{3,})/i,
+      /serie[:\s#]*([0-9A-Z-]{3,})/i,
+      /consecutivo[:\s#]*([0-9A-Z-]{3,})/i
+    ];
+
+    for (const pattern of invoicePatterns) {
+      const invoiceMatch = rawText.match(pattern);
+      if (invoiceMatch && invoiceMatch[1]) {
+        const candidate = invoiceMatch[1].trim();
+        // Validar que no sea solo una fecha o palabras genéricas
+        if (!/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(candidate) &&
+          !/^(electronica|interna|auxiliar)$/i.test(candidate) &&
+          !/cion$/i.test(candidate) && // Excluir palabras como "Ubicacion"
+          /\d/.test(candidate)) {      // Debe contener al menos un dígito
+          data.invoiceNumber = candidate;
+          break;
+        }
+      }
+    }
+
+    logger.info('[Parser] Extracción completada:');
+    logger.info(`  - Vendedor: ${data.vendorName || 'N/A'}`);
+    logger.info(`  - Factura: ${data.invoiceNumber || 'N/A'}`);
+    logger.info(`  - Fecha: ${data.date || 'N/A'}`);
+    logger.info(`  - Subtotal: ${data.subtotalAmount || 'N/A'}`);
+    logger.info(`  - Impuesto: ${data.taxAmount || 'N/A'} (${data.taxPercentage || 'N/A'}%)`);
+    logger.info(`  - Total: ${data.amount || 'N/A'}`);
 
     return data;
   }

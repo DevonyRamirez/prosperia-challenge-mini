@@ -56,9 +56,17 @@ router.post('/api/receipts', upload.single('file'), async (req: Request, res: Re
       const ocr = getOcrProvider('tesseract');
       const rawText = await ocr.extractText(file.path);
 
+      logger.info('\n========== RAW OCR TEXT ==========');
+      logger.info(rawText);
+      logger.info('==================================\n');
+
       // 2. Parse the extracted text
       const parser = new ReceiptParser();
       const parsedData = parser.parse(rawText);
+
+      logger.info('\n========== PARSED JSON DATA ==========');
+      logger.info(JSON.stringify(parsedData, null, 2));
+      logger.info('======================================\n');
 
       // 3. Construct result
       const result: ReceiptResult = {

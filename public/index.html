@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +11,7 @@
       padding: 0;
       box-sizing: border-box;
     }
-    
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -20,28 +21,42 @@
       align-items: center;
       padding: 20px;
     }
-    
+
     .container {
       background: white;
       border-radius: 12px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-      max-width: 600px;
+      max-width: 900px;
       width: 100%;
       padding: 40px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 30px;
     }
-    
+
+    @media (min-width: 768px) {
+      .container {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .main-section {
+        border-right: 1px solid #eee;
+        padding-right: 30px;
+      }
+    }
+
     h1 {
       color: #333;
       margin-bottom: 10px;
       font-size: 28px;
     }
-    
+
     .subtitle {
       color: #666;
       margin-bottom: 30px;
       font-size: 14px;
     }
-    
+
     .upload-area {
       border: 2px dashed #667eea;
       border-radius: 8px;
@@ -51,37 +66,37 @@
       transition: all 0.3s ease;
       margin-bottom: 20px;
     }
-    
+
     .upload-area:hover {
       border-color: #764ba2;
       background: #f8f9ff;
     }
-    
+
     .upload-area.dragover {
       background: #f0f4ff;
       border-color: #764ba2;
     }
-    
+
     .upload-icon {
       font-size: 48px;
       margin-bottom: 10px;
     }
-    
+
     .upload-text {
       color: #667eea;
       font-weight: 600;
       margin-bottom: 5px;
     }
-    
+
     .upload-hint {
       color: #999;
       font-size: 12px;
     }
-    
+
     input[type="file"] {
       display: none;
     }
-    
+
     button {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
@@ -94,16 +109,24 @@
       transition: transform 0.2s ease;
       width: 100%;
     }
-    
+
     button:hover {
       transform: translateY(-2px);
     }
-    
+
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
     }
-    
+
+    .clear-history-btn {
+      background: #eee;
+      color: #666;
+      margin-top: 10px;
+      font-size: 12px;
+      padding: 8px;
+    }
+
     .status {
       margin-top: 20px;
       padding: 15px;
@@ -111,28 +134,28 @@
       font-size: 14px;
       display: none;
     }
-    
+
     .status.loading {
       display: block;
       background: #e8f4f8;
       color: #00758f;
       border: 1px solid #b3dce8;
     }
-    
+
     .status.success {
       display: block;
       background: #e8f5e9;
       color: #2e7d32;
       border: 1px solid #c8e6c9;
     }
-    
+
     .status.error {
       display: block;
       background: #ffebee;
       color: #c62828;
       border: 1px solid #ffcdd2;
     }
-    
+
     .result {
       display: none;
       margin-top: 30px;
@@ -140,17 +163,17 @@
       background: #f5f5f5;
       border-radius: 8px;
     }
-    
+
     .result.show {
       display: block;
     }
-    
+
     .result-title {
       font-weight: 600;
       margin-bottom: 15px;
       color: #333;
     }
-    
+
     .result-row {
       display: flex;
       justify-content: space-between;
@@ -158,23 +181,23 @@
       border-bottom: 1px solid #ddd;
       font-size: 14px;
     }
-    
+
     .result-row:last-child {
       border-bottom: none;
     }
-    
+
     .result-label {
       font-weight: 500;
       color: #666;
     }
-    
+
     .result-value {
       color: #333;
       word-break: break-word;
       max-width: 200px;
       text-align: right;
     }
-    
+
     .raw-text {
       margin-top: 20px;
       padding: 15px;
@@ -188,57 +211,116 @@
       color: #333;
       white-space: pre-wrap;
     }
+
+    /* History Section Styles */
+    .history-section {
+      max-height: 600px;
+      overflow-y: auto;
+    }
+
+    .history-item {
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .history-item:hover {
+      border-color: #667eea;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .history-vendor {
+      font-weight: bold;
+      color: #333;
+    }
+
+    .history-date {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .history-amount {
+      font-weight: 600;
+      color: #2e7d32;
+    }
+
+    .history-empty {
+      text-align: center;
+      color: #999;
+      font-style: italic;
+      padding: 20px;
+    }
   </style>
 </head>
+
 <body>
   <div class="container">
-    <h1>📋 Mini Prosperia</h1>
-    <p class="subtitle">Upload a receipt image or PDF to extract information</p>
-    
-    <form id="uploadForm">
-      <div class="upload-area" id="uploadArea">
-        <div class="upload-icon">📷</div>
-        <div class="upload-text">Drag & drop or click to upload</div>
-        <div class="upload-hint">PNG, JPG, or PDF (max 10MB)</div>
-        <input type="file" id="fileInput" accept="image/png,image/jpeg,application/pdf" />
+    <div class="main-section">
+      <h1>📋 Mini Prosperia</h1>
+      <p class="subtitle">Upload a receipt image or PDF to extract information</p>
+
+      <form id="uploadForm">
+        <div class="upload-area" id="uploadArea">
+          <div class="upload-icon">📷</div>
+          <div class="upload-text">Drag & drop or click to upload</div>
+          <div class="upload-hint">PNG, JPG, or PDF (max 10MB)</div>
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,application/pdf" />
+        </div>
+
+        <button type="submit">Extract Receipt Data</button>
+      </form>
+
+      <div class="status" id="status"></div>
+
+      <div class="result" id="result">
+        <div class="result-title">Extracted Receipt Information</div>
+        <div class="result-row">
+          <span class="result-label">Vendor Name:</span>
+          <span class="result-value" id="vendorName">-</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Invoice Number:</span>
+          <span class="result-value" id="invoiceNumber">-</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Date:</span>
+          <span class="result-value" id="date">-</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Subtotal:</span>
+          <span class="result-value" id="subtotal">-</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Tax (%):</span>
+          <span class="result-value" id="taxPercentage">-</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Tax Amount:</span>
+          <span class="result-value" id="taxAmount">-</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label"><strong>Total:</strong></span>
+          <span class="result-value"><strong id="total">-</strong></span>
+        </div>
+        <div class="raw-text" id="rawText"></div>
       </div>
-      
-      <button type="submit">Extract Receipt Data</button>
-    </form>
-    
-    <div class="status" id="status"></div>
-    
-    <div class="result" id="result">
-      <div class="result-title">Extracted Receipt Information</div>
-      <div class="result-row">
-        <span class="result-label">Vendor Name:</span>
-        <span class="result-value" id="vendorName">-</span>
-      </div>
-      <div class="result-row">
-        <span class="result-label">Invoice Number:</span>
-        <span class="result-value" id="invoiceNumber">-</span>
-      </div>
-      <div class="result-row">
-        <span class="result-label">Date:</span>
-        <span class="result-value" id="date">-</span>
-      </div>
-      <div class="result-row">
-        <span class="result-label">Subtotal:</span>
-        <span class="result-value" id="subtotal">-</span>
-      </div>
-      <div class="result-row">
-        <span class="result-label">Tax (%):</span>
-        <span class="result-value" id="taxPercentage">-</span>
-      </div>
-      <div class="result-row">
-        <span class="result-label">Tax Amount:</span>
-        <span class="result-value" id="taxAmount">-</span>
-      </div>
-      <div class="result-row">
-        <span class="result-label"><strong>Total:</strong></span>
-        <span class="result-value"><strong id="total">-</strong></span>
-      </div>
-      <div class="raw-text" id="rawText"></div>
+    </div>
+
+    <div class="history-section">
+      <h2>✨ Receipt History</h2>
+      <p class="subtitle">Locally saved receipts</p>
+      <div id="historyList"></div>
+      <button class="clear-history-btn" onclick="clearHistory()">Clear History</button>
     </div>
   </div>
 
@@ -248,6 +330,19 @@
     const uploadForm = document.getElementById('uploadForm');
     const status = document.getElementById('status');
     const result = document.getElementById('result');
+    const uploadText = document.querySelector('.upload-text');
+    const historyList = document.getElementById('historyList');
+
+    // Initialize history on load
+    loadHistory();
+
+    function updateFileDisplay() {
+      if (fileInput.files.length) {
+        uploadText.textContent = `File selected: ${fileInput.files[0].name}`;
+      }
+    }
+
+    fileInput.addEventListener('change', updateFileDisplay);
 
     // Drag and drop
     uploadArea.addEventListener('click', () => fileInput.click());
@@ -262,6 +357,7 @@
       e.preventDefault();
       uploadArea.classList.remove('dragover');
       fileInput.files = e.dataTransfer.files;
+      updateFileDisplay();
     });
 
     uploadForm.addEventListener('submit', async (e) => {
@@ -292,7 +388,9 @@
 
         const data = await response.json();
         showStatus('Receipt extracted successfully!', 'success');
+
         displayResult(data.data);
+        saveToHistory(data.data); // Save to localStorage
       } catch (error) {
         showStatus(`Error: ${error.message}`, 'error');
       }
@@ -314,6 +412,57 @@
       document.getElementById('rawText').textContent = data.rawText;
       result.classList.add('show');
     }
+
+    // History Logic
+    function saveToHistory(data) {
+      const history = JSON.parse(localStorage.getItem('receiptHistory') || '[]');
+      const newItem = {
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        ...data
+      };
+      history.unshift(newItem); // Add to top
+      localStorage.setItem('receiptHistory', JSON.stringify(history));
+      loadHistory();
+    }
+
+    function loadHistory() {
+      const history = JSON.parse(localStorage.getItem('receiptHistory') || '[]');
+      historyList.innerHTML = '';
+
+      if (history.length === 0) {
+        historyList.innerHTML = '<div class="history-empty">No receipts saved yet</div>';
+        return;
+      }
+
+      history.forEach(item => {
+        const el = document.createElement('div');
+        el.className = 'history-item';
+        el.innerHTML = `
+          <div class="history-header">
+            <span class="history-vendor">${item.vendorName || 'Unknown Vendor'}</span>
+            <span class="history-amount">$${(item.amount || 0).toFixed(2)}</span>
+          </div>
+          <div class="history-date">${item.date || 'No Date'}</div>
+        `;
+        el.onclick = () => {
+          displayResult(item);
+          // Scroll to top on mobile
+          if (window.innerWidth < 768) {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }
+        };
+        historyList.appendChild(el);
+      });
+    }
+
+    window.clearHistory = function () { // Attach to window for onclick access
+      if (confirm('Are you sure you want to clear your receipt history?')) {
+        localStorage.removeItem('receiptHistory');
+        loadHistory();
+      }
+    }
   </script>
 </body>
+
 </html>
